@@ -1,0 +1,276 @@
+<html>
+<head>
+    <title>Adonis Maps</title>
+    <link rel="stylesheet" href="/css/stylemap.css" type="text/css"/>
+    <!-- bring in the OpenLayers javascript library -->
+    <script src="/js/jquery.js"></script>
+    <script src="/js/OpenLayers.debug.js"></script>
+    <script src="/js/gc_example.js"></script>
+    <script src="/js/greatcirclemod.js"></script>
+    <script src="/js/OpenStreetMap.js"></script>
+
+    <script type="text/javascript">
+        // Start position for the map (hardcoded here for simplicity)
+        var map;
+
+        //Initialise the 'map' object
+        function init() {
+            map = new OpenLayers.Map("map", {
+                controls: [
+                    new OpenLayers.Control.Zoom({
+                        zoomInId: "customZoomIn",
+                        zoomOutId: "customZoomOut"
+                    })
+                ]
+            });
+
+            var Navigation = new OpenLayers.Control.Navigation({
+                'zoomWheelEnabled': false,
+                'defaultDblClick': function (event) {
+                }
+            });
+
+            vectors = new OpenLayers.Layer.Vector(
+                    "Simple Geometry",
+                    {
+                        styleMap: new OpenLayers.StyleMap({
+                            "default": {
+                                externalGraphic: "/js/img/airplane-512.png",
+                                //graphicWidth: 17,
+                                graphicHeight: 20,
+                                graphicYOffset: -19,
+                                rotation: "${angle}",
+                                fillOpacity: "${opacity}"
+                            }
+                        })
+                    }
+            );
+
+            var lineLayer = new OpenLayers.Layer.Vector("Line Layer");
+            map.addLayer(lineLayer);
+            map.addLayer(vectors);
+//            map.addLayer([lineLayer, vectors]);
+            map.addControl(new OpenLayers.Control.DrawFeature(lineLayer, OpenLayers.Handler.Path));
+            var markers = new OpenLayers.Layer.Markers("Markers");
+            var size = new OpenLayers.Size(50, 50);
+            var offset = new OpenLayers.Pixel(-(size.w / 2), -size.h);
+            var icon = new OpenLayers.Icon('/js/img/airplane-512.png', size, offset);
+
+//            var features = [];
+
+            map.addControl(Navigation);
+            layerMapnik = new OpenLayers.Layer.OSM.Mapnik("Mapnik");
+            map.addLayer(layerMapnik);
+            setInterval(update, 3000);
+            //var id = 200;
+
+            var lyrDistancePoints;
+
+            addLayer(serverObj["server"][0]);
+
+            lyrDistancePoints = map.layers[map.layers.length-1];
+            lyrDistancePoints.name = "Distance Points";
+
+            var firstUpdate = true;
+            update();
+
+            function update() {
+                //id = id + 1;
+
+                map.updateSize();
+
+                $.getJSON("/inc/gpsdata.php", function (data) {
+
+                    if (data.tpv[0].lon != null) {
+                        var points = [
+                            new OpenLayers.Geometry.Point(
+                                    data.tpv[0].lon,
+                                    data.tpv[0].lat
+                            )
+                                    .transform(
+                                    new OpenLayers.Projection("EPSG:4326"),
+                                    map.getProjectionObject()
+                            ),
+                            new OpenLayers.Geometry.Point(
+                                    data.od.lon,
+                                    data.od.lat
+                            )
+                                    .transform(
+                                    new OpenLayers.Projection("EPSG:4326"),
+                                    map.getProjectionObject()
+                            )
+                        ];
+
+                        //start
+                        var point = new OpenLayers.Geometry.Point(data.tpv[0].lon,data.tpv[0].lat).transform(new
+                                OpenLayers.Projection
+                        ("EPSG:4326"), new OpenLayers.Projection(map.projection));
+                        var pointFeature = new OpenLayers.Feature.Vector(point,null,null);
+
+                        //end
+                        var point2 = new OpenLayers.Geometry.Point(data.od.lon,data.od.lat).transform(new OpenLayers
+                                .Projection("EPSG:4326"), new OpenLayers.Projection(map.projection));
+                        var pointFeature2 = new OpenLayers.Feature.Vector(point2,null,null);
+
+                        pointFeature.style  = {externalGraphic: "http://gis.ibbeck.de/ginfo/apps/OLExamples/OL26/img/marker.png", graphicYOffset: -20, pointRadius: 10};
+                        pointFeature2.style = {externalGraphic: "http://gis.ibbeck.de/ginfo/apps/OLExamples/OL26/img/marker-blue.png", graphicYOffset: -20, pointRadius: 10};
+
+                        lyrDistancePoints.addFeatures([pointFeature, pointFeature2]);
+
+//                        ctrlLyr = new OpenLayers.Control.LayerSwitcher();
+//                        map.addControl(ctrlLyr);
+
+//                        var line = new OpenLayers.Geometry.LineString(points);
+//
+//                        var style = {
+//                            strokeColor: '#003300',
+//                            strokeOpacity: 0.5,
+//                            strokeWidth: 3
+//                        };
+//
+//                        if (!firstUpdate) {
+//                            lineLayer.destroyFeatures();
+//                        }
+//
+//                        var lineFeature = new OpenLayers.Feature.Vector(line, null, style);
+//
+//                        lineLayer.addFeatures([lineFeature]);
+                        lat = data.tpv[0].lat;
+                        lon = data.tpv[0].lon;
+
+                        var center = new OpenLayers.LonLat(lon, lat)
+                                .transform(new OpenLayers.Projection("EPSG:4326"), map.getProjectionObject());
+
+                        if (firstUpdate) {
+                            show_orthodrome(lyrDistancePoints);
+                            map.setCenter(center, 7);
+                            firstUpdate = false;
+                        }
+
+                        markers.clearMarkers();
+                        markers.addMarker(new OpenLayers.Marker(center, icon));
+                        map.addLayer(markers);
+                    }
+                });
+            }
+
+            map.events.register('zoomend', this, function (event) {
+                var x = map.getZoom();
+                var center = new OpenLayers.LonLat(lon, lat)
+                        .transform(new OpenLayers.Projection("EPSG:4326"), map.getProjectionObject());
+                if (x < 5) {
+                    map.setCenter(center, 5);
+                } else if (x > 7) {
+                    map.setCenter(center, 7);
+                } else {
+                    map.setCenter(center, x);
+                }
+            });
+        }
+
+        function getPoints(){
+            var gpsdata = $.ajax({url: "/inc/gpsdata.php", async: false }).responseText;
+
+            gpsdata = JSON.parse(gpsdata);
+
+            return {
+                "startLon": gpsdata.tpv[0].lon,
+                "startLat": gpsdata.tpv[0].lat,
+                "endLon": gpsdata.od.lon,
+                "endLat": gpsdata.od.lat
+            };
+        }
+
+        function init2()
+        {
+
+            var map, lyrDistancePoints;
+
+            map = new OpenLayers.Map("map", {
+                controls: [
+                    new OpenLayers.Control.Zoom({
+                        zoomInId: "customZoomIn",
+                        zoomOutId: "customZoomOut"
+                    })
+                ]
+            });
+
+            var Navigation = new OpenLayers.Control.Navigation({
+                'zoomWheelEnabled': false,
+                'defaultDblClick': function (event) {
+                }
+            });
+
+            var lineLayer = new OpenLayers.Layer.Vector("Line Layer");
+            map.addLayer(lineLayer);
+//            map.addLayer(vectors);
+//            map.addLayer([lineLayer, vectors]);
+            map.addControl(new OpenLayers.Control.DrawFeature(lineLayer, OpenLayers.Handler.Path));
+            var markers = new OpenLayers.Layer.Markers("Markers");
+            var size = new OpenLayers.Size(50, 50);
+            var offset = new OpenLayers.Pixel(-(size.w / 2), -size.h);
+            var icon = new OpenLayers.Icon('/js/img/airplane-512.png', size, offset);
+
+            lyrDistancePoints = map.layers[map.layers.length-1];
+            lyrDistancePoints.name = "Movable Distance Points";
+
+            map.addControl(Navigation);
+            layerMapnik = new OpenLayers.Layer.OSM.Mapnik("Mapnik");
+            map.addLayer(layerMapnik);
+//            setInterval(update, 3000);
+
+//            map.addControl(new OpenLayers.Control.PanZoomBar(),new OpenLayers.Pixel(2,-13));
+//            map.addControl(new OpenLayers.Control.MouseDefaults());
+//            map.addControl(new OpenLayers.Control.MousePosition({element:document.getElementById("rota"), numdigits:3}));
+
+//            ctrlDragFeature   = new OpenLayers.Control.DragFeature(lyrDistancePoints);
+//            map.addControl(ctrlDragFeature);
+//            ctrlDragFeature.activate();
+
+            ctrlLyr = new OpenLayers.Control.LayerSwitcher();
+            map.addControl(ctrlLyr);
+
+            var points = getPoints();
+
+            var point = new OpenLayers.Geometry.Point(points.startLon,points.startLat).transform(new OpenLayers
+                    .Projection
+            ("EPSG:4326"), new OpenLayers.Projection(map.projection));
+            var pointFeature = new OpenLayers.Feature.Vector(point,null,null);
+
+            var point2 = new OpenLayers.Geometry.Point(points.endLon,points.endLat).transform(new OpenLayers.Projection
+            ("EPSG:4326"), new OpenLayers.Projection(map.projection));
+            var pointFeature2 = new OpenLayers.Feature.Vector(point2,null,null);
+
+            pointFeature.style  = {externalGraphic: "http://gis.ibbeck.de/ginfo/apps/OLExamples/OL26/img/marker.png", graphicYOffset: -20, pointRadius: 10};
+            pointFeature2.style = {externalGraphic: "http://gis.ibbeck.de/ginfo/apps/OLExamples/OL26/img/marker-blue.png", graphicYOffset: -20, pointRadius: 10};
+
+            lyrDistancePoints.addFeatures([pointFeature, pointFeature2]);
+
+            if(map.projection != "EPSG:4326")
+                map.setCenter(new OpenLayers.LonLat(0,0).transform(new OpenLayers.Projection("EPSG:4326"), new OpenLayers.Projection(map.projection)), 2);
+            else
+                map.setCenter(new OpenLayers.LonLat(0,0), 1);
+
+            document.getElementById("epsg").innerHTML = map.projection;
+
+            orthodromeFlag=false;
+            document.getElementById("cbOD").checked = false;
+
+        }
+
+        //        });
+    </script>
+    <style>
+        .olControlZoom {
+            top: 58px !important;
+        }
+    </style>
+</head>
+
+<!-- body.onload is called once the page is loaded (call the 'init' function) -->
+<body onload="init();">
+
+<!-- define a DIV into which the map will appear. Make it take up the whole window -->
+<div style="width:100%; height:100%" id="map"></div>
+</body>
+</html>
